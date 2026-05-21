@@ -12,7 +12,7 @@ st.write("Füttere die KI mit einem Bild vom Himmel, um zu sehen, ob du einen Re
 @st.cache_resource
 def load_weather_model():
     # Wir nutzen das vortrainierte Wetter-Modell von Hugging Face
-    return pipeline("image-classification", model="raccor/google-vit-base-patch16-224-weather-classification")
+return pipeline("image-classification", model="google/vit-base-patch16-224")
 
 with st.spinner("KI-Wetter-Modell wird gestartet..."):
     classifier = load_weather_model()
