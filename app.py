@@ -1,47 +1,56 @@
 import streamlit as st
-from transformers import pipeline
 from PIL import Image
-import os
+import numpy as np
+import onnxruntime as ort
 
-# 1. App-Konfiguration
+# 1. App-Konfiguration & Styling
 st.set_page_config(page_title="Himmel-Scanner", page_icon="🌦️", layout="centered")
 
 st.title("🌦️ KI Himmels-Scanner")
-st.write("Diese App nutzt ein echtes Hugging-Face-Wettermodell direkt auf dem Server.")
+st.write("Diese App läuft zu 100% offline über ein integriertes ONNX-Wettermodell!")
 
-# 2. Modell sicher herunterladen und lokal cachen (Verhindert Internet-Fehler nach dem Start)
+# Wetter-Klassen, die dieses Modell gelernt hat
+CLASSES = ["Cloudy (Bewölkt)", "Foggy (Nebelig)", "Rainy (Regnerisch)", "Sunny (Sonnig)"]
+
+# 2. ONNX Modell laden
 @st.cache_resource
-def load_weather_model():
-    # Wir zwingen die App, das Modell in den lokalen Ordner zu sichern
-    local_model_dir = "./mein_wetter_modell"
-    
-    if not os.path.exists(local_model_dir):
-        with st.spinner("Modell wird das erste Mal von Hugging Face geladen... Bitte ca. 1 Minute Geduld!"):
-            # Holt das spezialisierte Wetter-Modell
-            pipe = pipeline("image-classification", model="raccor/google-vit-base-patch16-224-weather-classification")
-            # Speichert es lokal ab, damit kein Internet mehr gebraucht wird
-            pipe.save_pretrained(local_model_dir)
-            return pipe
-    else:
-        # Wenn es schon existiert, laden wir es blitzschnell offline aus dem Ordner
-        return pipeline("image-classification", model=local_model_dir)
+def load_onnx_model():
+    # Lädt die Datei direkt aus deinem Projektordner
+    return ort.InferenceSession("weather_model.onnx")
 
 try:
-    classifier = load_weather_model()
+    session = load_onnx_model()
+    st.success("✅ KI-Modell erfolgreich lokal geladen!")
 except Exception as e:
-    st.error(f"Fehler beim Starten des Modells: {e}")
-    st.write("Tipp: Falls Streamlit Cloud das Internet sperrt, starte die App einmal lokal auf deinem Computer, damit das Modell heruntergeladen wird!")
+    st.error("❌ Die Datei 'weather_model.onnx' wurde im Ordner nicht gefunden!")
+    st.write("Bitte stelle sicher, dass du die Modelldatei heruntergeladen und in denselben Ordner wie die app.py gelegt hast.")
+    st.stop()
+
+# 3. Bildvorbereitung (Preprocessing für die KI)
+def preprocess_image(image):
+    # Bild auf die exakte Größe bringen, die das Modell erwartet (224x224 Pixel)
+    image = image.resize((224, 224))
+    img_data = np.array(image).astype('float32') / 255.0
+    
+    # Normalisierung (Standard für Vision-Modelle)
+    mean = np.array([0.485, 0.456, 0.406])
+    std = np.array([0.229, 0.224, 0.225])
+    img_data = (img_data - mean) / std
+    
+    # Dimensionen anpassen (Vom Bild-Format ins KI-Format: Channels First)
+    img_data = np.transpose(img_data, (2, 0, 1))
+    img_data = np.expand_dims(img_data, axis=0)
+    return img_data
 
 st.markdown("---")
 
-# 3. Auswahlmodus: Hochladen ODER Kamera
+# 4. GUI-Auswahlmodus
 st.subheader("Wie möchtest du das Foto bereitstellen?")
 tab1, tab2 = st.tabs(["📁 Foto hochladen", "📸 Foto machen (Live-Kamera)"])
 
 img_file = None
-
 with tab1:
-    uploaded_file = st.file_uploader("Wähle ein Bild vom Himmel oder den Wolken aus:", type=["jpg", "jpeg", "png"], key="uploader")
+    uploaded_file = st.file_uploader("Wähle ein Bild vom Himmel aus:", type=["jpg", "jpeg", "png"], key="uploader")
     if uploaded_file:
         img_file = uploaded_file
 
@@ -50,52 +59,45 @@ with tab2:
     if camera_file:
         img_file = camera_file
 
-# 4. Auswertung und Wetter-Logik
+# 5. Auswertung & Regenschirm-Entscheidung
 if img_file is not None:
     image = Image.open(img_file).convert("RGB")
     
     st.markdown("---")
     st.subheader("🧠 KI-Analyse läuft...")
     
-    with st.spinner("Das Hugging-Face-Modell analysiert die Wolken..."):
-        # Vorhersage mit dem spezialisierten Wetter-Modell treffen
-        predictions = classifier(image)
-        
-        # Das beste Ergebnis extrahieren
-        top_result = predictions[0]
-        weather_label = top_result['label'].lower()
-        confidence = top_result['score'] * 100
+    # Bild für die KI vorbereiten
+    input_data = preprocess_image(image)
+    
+    # KI-Berechnung starten
+    input_name = session.get_inputs()[0].name
+    outputs = session.run(None, {input_name: input_data})
+    
+    # Ergebnisse auswerten (Softmax für Prozentwerte)
+    logits = outputs[0][0]
+    exp_logits = np.exp(logits - np.max(logits))
+    probabilities = exp_logits / exp_logits.sum()
+    
+    # Das beste Ergebnis finden
+    top_class_idx = np.argmax(probabilities)
+    weather_label = CLASSES[top_class_idx]
+    confidence = probabilities[top_class_idx] * 100
 
-    # Anzeige der genauen Klassen von Hugging Face
-    st.info(f"**Erkannte Wetterlage:** `{weather_label.capitalize()}` ({confidence:.1f}% Sicherheit)")
+    # Ergebnis anzeigen
+    st.info(f"**Erkannte Wetterlage:** `{weather_label}` (Sicherheit: {confidence:.1f}%)")
 
-    # 5. Problemorientierung & Alltagsbezug: Regenschirm-Entscheidung
+    # 6. Regenschirm-Logik (Alltagsbezug für Lübeck)
     st.subheader("☂️ Deine Empfehlung:")
 
-    # Das Hugging Face Modell kennt exakt diese Klassen: "rainy", "cloudy", "sunny", "foggy"
-    if "rain" in weather_label:
+    if "Rainy" in weather_label:
         st.error("🚨 **Schauer-Alarm! Nimm UNBEDINGT einen Regenschirm mit.**")
-        st.write(
-            "Die KI hat eindeutig Regen oder extrem nasse Schauerwolken erkannt. "
-            "Wenn du jetzt ohne Schirm oder Regenjacke rausgehst, wirst du nass!"
-        )
-    elif "cloudy" in weather_label:
-        st.warning("⚠️ **Vorsicht: Grauer Himmel / Späterer Regen möglich.**")
-        st.write(
-            "Die KI erkennt dichte Bewölkung (Cloudy). Auch wenn es in Lübeck gerade "
-            "noch trocken sein sollte: Das Wetter kann schnell umschlagen. "
-            "Nimm zur Sicherheit lieber eine Jacke oder einen kleinen Schirm mit!"
-        )
-    elif "sunny" in weather_label or "clear" in weather_label:
+        st.write("Die KI sieht dicke Regenwolken. Geh nicht ohne Schirm aus dem Haus!")
+    elif "Cloudy" in weather_label:
+        st.warning("⚠️ **Späterer Regen möglich (Bewölkt).**")
+        st.write("Es ist aktuell zwar noch trocken, aber der Himmel ist dicht. Ein kleiner Schirm in der Tasche schadet heute nicht.")
+    elif "Sunny" in weather_label:
         st.success("😎 **Kein Regenschirm nötig!**")
-        st.write(
-            "Die KI meldet Sonnenschein oder einen klaren, freundlichen Himmel. "
-            "Du wirst heute trocken bleiben. Lass den Schirm zu Hause und genieß den Tag!"
-        )
+        st.write("Freie Sicht und Sonne! Du kannst deinen Regenschirm heute beruhigt zu Hause lassen.")
     else:
-        # Für "foggy" (Nebel) oder unklare Ergebnisse
-        st.warning("🌫️ **Sichtbehinderung / Nebelig**")
-        st.write(
-            "Die KI erkennt Nebel oder starken Dunst. Es ist zwar kein akuter Wolkenbruch "
-            "zu sehen, aber es könnte feucht und kühl sein. Pack dich warm ein!"
-        )
+        st.warning("🌫️ **Nebelig / Feucht**")
+        st.write("Es ist nebelig. Pack dich warm ein, ein dicker Regenschirm ist aber vermutlich nicht nötig.")
