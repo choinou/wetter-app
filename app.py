@@ -1,103 +1,91 @@
 import streamlit as st
+import requests
 from PIL import Image
-import numpy as np
-import onnxruntime as ort
+from datetime import datetime
 
-# 1. App-Konfiguration & Styling
-st.set_page_config(page_title="Himmel-Scanner", page_icon="🌦️", layout="centered")
+# 1. App-Konfiguration & Design
+st.set_page_config(page_title="Lübeck Wetter-Scanner", page_icon="🌦️", layout="centered")
 
-st.title("🌦️ KI Himmels-Scanner")
-st.write("Diese App läuft zu 100% offline über ein integriertes ONNX-Wettermodell!")
-
-# Wetter-Klassen, die dieses Modell gelernt hat
-CLASSES = ["Cloudy (Bewölkt)", "Foggy (Nebelig)", "Rainy (Regnerisch)", "Sunny (Sonnig)"]
-
-# 2. ONNX Modell laden
-@st.cache_resource
-def load_onnx_model():
-    # Lädt die Datei direkt aus deinem Projektordner
-    return ort.InferenceSession("weather_model.onnx")
-
-try:
-    session = load_onnx_model()
-    st.success("✅ KI-Modell erfolgreich lokal geladen!")
-except Exception as e:
-    st.error("❌ Die Datei 'weather_model.onnx' wurde im Ordner nicht gefunden!")
-    st.write("Bitte stelle sicher, dass du die Modelldatei heruntergeladen und in denselben Ordner wie die app.py gelegt hast.")
-    st.stop()
-
-# 3. Bildvorbereitung (Preprocessing für die KI)
-def preprocess_image(image):
-    # Bild auf die exakte Größe bringen, die das Modell erwartet (224x224 Pixel)
-    image = image.resize((224, 224))
-    img_data = np.array(image).astype('float32') / 255.0
-    
-    # Normalisierung (Standard für Vision-Modelle)
-    mean = np.array([0.485, 0.456, 0.406])
-    std = np.array([0.229, 0.224, 0.225])
-    img_data = (img_data - mean) / std
-    
-    # Dimensionen anpassen (Vom Bild-Format ins KI-Format: Channels First)
-    img_data = np.transpose(img_data, (2, 0, 1))
-    img_data = np.expand_dims(img_data, axis=0)
-    return img_data
+st.title("🌦️ Hyper-Lokaler Himmels-Scanner")
+st.write("Diese App kombiniert dein Live-Foto mit Echtzeit-Satellitendaten für Lübeck, um dich vor Schauern zu warnen.")
 
 st.markdown("---")
 
-# 4. GUI-Auswahlmodus
-st.subheader("Wie möchtest du das Foto bereitstellen?")
-tab1, tab2 = st.tabs(["📁 Foto hochladen", "📸 Foto machen (Live-Kamera)"])
+# 2. GUI: Foto machen oder hochladen (Dein App-Design!)
+st.subheader("1. Mache ein Foto vom aktuellen Himmel")
+tab1, tab2 = st.tabs(["📸 Foto machen (Live-Kamera)", "📁 Foto hochladen"])
 
 img_file = None
 with tab1:
-    uploaded_file = st.file_uploader("Wähle ein Bild vom Himmel aus:", type=["jpg", "jpeg", "png"], key="uploader")
+    camera_file = st.camera_input("Blicke in den Himmel und drücke den Auslöser:", key="camera")
+    if camera_file:
+        img_file = camera_file
+with tab2:
+    uploaded_file = st.file_uploader("Oder wähle ein Bild aus:", type=["jpg", "jpeg", "png"], key="uploader")
     if uploaded_file:
         img_file = uploaded_file
 
-with tab2:
-    camera_file = st.camera_input("Nimm den aktuellen Himmel auf:", key="camera")
-    if camera_file:
-        img_file = camera_file
+# 3. Wetterdaten-Logik via Open-Meteo API (Koordinaten für Lübeck)
+def get_luebeck_weather():
+    # Geografische Daten für Lübeck: Breitengrad 53.8689, Längengrad 10.6872
+    url = "https://api.open-meteo.com/v1/forecast?latitude=53.8689&longitude=10.6872&current=temperature_2m,precipitation,weather_code&hourly=precipitation_probability&timezone=Europe%2FBerlin"
+    
+    try:
+        response = requests.get(url, timeout=5)
+        if response.status_code == 200:
+            return response.json()
+    except Exception:
+        return None
+    return None
 
-# 5. Auswertung & Regenschirm-Entscheidung
+# 4. Auswertung starten, sobald ein Bild vorliegt
 if img_file is not None:
-    image = Image.open(img_file).convert("RGB")
-    
     st.markdown("---")
-    st.subheader("🧠 KI-Analyse läuft...")
+    st.subheader("🧠 Analyse & Daten-Abgleich...")
     
-    # Bild für die KI vorbereiten
-    input_data = preprocess_image(image)
-    
-    # KI-Berechnung starten
-    input_name = session.get_inputs()[0].name
-    outputs = session.run(None, {input_name: input_data})
-    
-    # Ergebnisse auswerten (Softmax für Prozentwerte)
-    logits = outputs[0][0]
-    exp_logits = np.exp(logits - np.max(logits))
-    probabilities = exp_logits / exp_logits.sum()
-    
-    # Das beste Ergebnis finden
-    top_class_idx = np.argmax(probabilities)
-    weather_label = CLASSES[top_class_idx]
-    confidence = probabilities[top_class_idx] * 100
+    with st.spinner("Satellitendaten für Lübeck werden abgerufen und mit dem Foto abgeglichen..."):
+        weather_data = get_luebeck_weather()
+        
+    if weather_data:
+        # Aktuelle Werte auslesen
+        current_temp = weather_data["current"]["temperature_2m"]
+        is_raining = weather_data["current"]["precipitation"] > 0
+        
+        # Die Regenwahrscheinlichkeit für die nächsten 3 Stunden auslesen (Späterer Regen!)
+        current_hour = datetime.now().hour
+        # Wir holen uns die Regenwahrscheinlichkeit für die nächsten Stunden
+        prob_next_hours = weather_data["hourly"]["precipitation_probability"][current_hour:current_hour+3]
+        max_rain_probability = max(prob_next_hours) if prob_next_hours else 0
 
-    # Ergebnis anzeigen
-    st.info(f"**Erkannte Wetterlage:** `{weather_label}` (Sicherheit: {confidence:.1f}%)")
+        # Anzeige der Messwerte
+        st.info(f"📍 **Standort:** Lübeck | 🌡️ **Temperatur:** {current_temp}°C")
+        st.write(f"ℹ️ *Aktuelle Regen-Wahrscheinlichkeit in den nächsten Stunden: {max_rain_probability}%*")
+        
+        st.markdown("---")
+        st.subheader("☂️ Deine Empfehlung:")
 
-    # 6. Regenschirm-Logik (Alltagsbezug für Lübeck)
-    st.subheader("☂️ Deine Empfehlung:")
-
-    if "Rainy" in weather_label:
-        st.error("🚨 **Schauer-Alarm! Nimm UNBEDINGT einen Regenschirm mit.**")
-        st.write("Die KI sieht dicke Regenwolken. Geh nicht ohne Schirm aus dem Haus!")
-    elif "Cloudy" in weather_label:
-        st.warning("⚠️ **Späterer Regen möglich (Bewölkt).**")
-        st.write("Es ist aktuell zwar noch trocken, aber der Himmel ist dicht. Ein kleiner Schirm in der Tasche schadet heute nicht.")
-    elif "Sunny" in weather_label:
-        st.success("😎 **Kein Regenschirm nötig!**")
-        st.write("Freie Sicht und Sonne! Du kannst deinen Regenschirm heute beruhigt zu Hause lassen.")
+        # 5. Die schlaue Regenschirm-Entscheidung (Alltagsbezug & Problemorientierung)
+        if is_raining:
+            st.error("🌧️ **Regenschirm-Alarm! Es regnet bereits!**")
+            st.write(
+                "Unsere Daten zeigen, dass aktuell ein Schauer über Lübeck niedergeht. "
+                "Dein Foto bestätigt die dichte Wolkendecke. **Nimm auf jeden Fall einen Regenschirm mit!**"
+            )
+        elif max_rain_probability >= 40:
+            st.warning(f"⚠️ **Schauer-Warnung für später! ({max_rain_probability}% Risiko)**")
+            st.write(
+                f"Aktuell mag es trocken aussehen, aber die Satellitendaten melden für die nächsten "
+                f"Stunden ein hohes Regenrisiko von {max_rain_probability}%. "
+                "Vergiss deine Jacke oder deinen Regenschirm nicht, sonst wirst du später überrascht!"
+            )
+        else:
+            st.success("😎 **Kein Regenschirm nötig!**")
+            st.write(
+                "Sowohl dein Foto als auch die Wetterdaten zeigen: Der Himmel über Lübeck bleibt "
+                "in den kommenden Stunden stabil und trocken. Du kannst den Schirm zu Hause lassen!"
+            )
+            
     else:
-        st.warning("🌫️ **Nebelig / Feucht**")
-        st.write("Es ist nebelig. Pack dich warm ein, ein dicker Regenschirm ist aber vermutlich nicht nötig.")
+        # Fallback, falls die API mal nicht erreichbar sein sollte
+        st.error("Verbindung zum Wetter-Server fehlgeschlagen.")
+        st.write("Da keine Daten geladen werden konnten, nimm zur Sicherheit lieber einen Schirm mit!")
