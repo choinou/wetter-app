@@ -1,15 +1,30 @@
 import streamlit as st
-from PIL import Image, ImageStat
+from transformers import pipeline
+from PIL import Image
 
 # 1. App-Konfiguration & Styling
 st.set_page_config(page_title="Himmel-Scanner Lübeck", page_icon="🌦️", layout="centered")
 
 st.title("🌦️ KI Himmels-Scanner")
-st.write("Die App analysiert die Pixelstruktur, Farbwerte und Helligkeit deines Fotos, um Schauer vorherzusagen.")
+st.write("Diese App nutzt ein neuronales Netzwerk von Hugging Face, um deine Himmelsfotos auf Schauerwolken zu analysieren.")
+
+# 2. Echtes Hugging-Face-Modell laden (Gecached für maximale Geschwindigkeit)
+@st.cache_resource
+def load_hf_model():
+    # Wir nutzen ein leichtgewichtiges, stabiles Bilderkennungsmodell von Microsoft via Hugging Face
+    # Es ist perfekt für Cloud-Server, da es extrem schnell und klein ist.
+    return pipeline("image-classification", model="microsoft/resnet-18")
+
+with st.spinner("🤖 Hugging Face KI-Modell wird gestartet... Bitte kurz warten."):
+    try:
+        classifier = load_hf_model()
+        st.success("🤖 KI-Modell erfolgreich geladen!")
+    except Exception as e:
+        st.error(f"Fehler beim Laden des Modells: {e}")
 
 st.markdown("---")
 
-# 2. GUI: Foto machen oder hochladen
+# 3. GUI: Foto machen oder hochladen
 st.subheader("1. Himmel fotografieren oder hochladen")
 tab1, tab2 = st.tabs(["📸 Foto machen (Live-Kamera)", "📁 Foto hochladen"])
 
@@ -23,72 +38,50 @@ with tab2:
     if uploaded_file:
         img_file = uploaded_file
 
-# 3. Die "Computer Vision" Bildanalyse-Logik
-def analyze_sky(image):
-    # Bild verkleinern, um die Analyse blitzschnell zu machen
-    img_small = image.resize((100, 100))
-    
-    # Statistiken über die Farben (Rot, Grün, Blau) berechnen
-    stat = ImageStat.Stat(img_small)
-    
-    # Durchschnittliche Helligkeit berechnen (0 = komplett schwarz, 255 = komplett weiß)
-    # Bei Regenwolken ist dieser Wert sehr niedrig (düster)
-    avg_brightness = sum(stat.mean) / 3
-    
-    # Blau-Anteil berechnen (Wichtig für schönen Himmel)
-    r, g, b = stat.mean[0], stat.mean[1], stat.mean[2]
-    
-    # Wenn viel Blau im Vergleich zu Rot/Grün da ist, ist der Himmel klar
-    is_blue_sky = b > (r + 5) and b > (g + 5)
-    
-    # Berechne einen "Düsterheits-Score" in Prozent
-    # Je dunkler und grauer das Bild, desto höher der Score
-    duester_score = max(0, min(100, int((255 - avg_brightness) * 0.6)))
-    
-    if is_blue_sky:
-        duester_score = max(0, duester_score - 30) # Blau zieht den Regen-Score runter
-        
-    return duester_score, avg_brightness
-
-# 4. Auswertung starten
+# 4. KI-Vorhersage & Regenschirm-Logik
 if img_file is not None:
     image = Image.open(img_file).convert("RGB")
     
     st.markdown("---")
-    st.subheader("🧠 KI-Pixelanalyse läuft...")
+    st.subheader("🧠 KI-Analyse läuft...")
     
-    with st.spinner("Analysiere Farbkanäle und Histogramm-Dichte..."):
-        # Unsere Bildanalyse aufrufen
-        regen_risiko, helligkeit = analyze_sky(image)
+    with st.spinner("Das neuronale Netzwerk analysiert das Bild..."):
+        # Das Hugging-Face-Modell analysiert das Foto und gibt die Top 5 Objekte zurück
+        predictions = classifier(image)
         
-    # Ein bisschen "KI-Feeling" für die Präsentation anzeigen
-    st.write("📊 **Analyse-Metriken der Bild-KI:**")
-    col1, col2 = st.columns(2)
-    col1.metric("Himmel-Helligkeit", f"{int(helligkeit)} / 255")
-    col2.metric("Errechnetes Regenrisiko", f"{regen_risiko}%")
+        # Wir holen uns alle erkannten Begriffe in eine Liste
+        detected_objects = [pred['label'].lower() for pred in predictions]
+        detected_string = ", ".join(detected_objects)
+
+    # Unsichtbarer Entwickler-Hinweis auf dem Bildschirm (gut zum Testen)
+    st.write(f"*(Erkannte Muster der KI: {detected_string})*")
     
     st.markdown("---")
     st.subheader("☂️ Deine Empfehlung für den Alltag:")
 
-    # 5. Schlaue Regenschirm-Entscheidung basierend auf den Bilddaten
-    if regen_risiko >= 55:
-        st.error("🌧️ **Regenschirm-Alarm! (Schauer sehr wahrscheinlich)**")
-        st.write(
-            f"Die KI-Analyse zeigt eine sehr hohe Pixeldichte im grauen und dunklen Bereich ({regen_risiko}% Düsterheit). "
-            "Das deutet stark auf schwere, wassergeladene Schauerwolken hin. "
-            "**Nimm auf jeden Fall einen Regenschirm oder eine wetterfeste Jacke mit!**"
-        )
-    elif 30 <= regen_risiko < 55:
-        st.warning("⚠️ **Späterer Regen möglich! (Bewölkter Himmel)**")
-        st.write(
-            f"Der Himmel ist laut Pixel-Scan spürbar bewölkt, aber noch nicht komplett finster. "
-            "Das Risiko für einen späteren Schauer liegt im mittleren Bereich. "
-            "Um in Lübeck nicht plötzlich überrascht zu werden, pack lieber einen kleinen Schirm ein!"
-        )
+    # 5. Schlaue Alltags-Logik basierend auf den KI-Ergebnissen
+    # Wenn das Modell Wolkenstrukturen, Dunst oder graue Muster erkennt:
+    if any(word in detected_string for word in ["cloud", "sky", "mist", "fog", "rain", "umbrella"]):
+        
+        # Eine kleine Zusatz-Unterscheidung: Sieht es nach richtig schweren Wolken aus?
+        if any(heavy in detected_string for word in detected_objects for heavy in ["thunder", "dark", "grey", "cumulus"]):
+            st.error("🌧️ **Regenschirm-Alarm! (Schauer sehr wahrscheinlich)**")
+            st.write(
+                "Das Hugging-Face-Modell erkennt sehr dichte, schwere Wolkenstrukturen. "
+                "Die Wahrscheinlichkeit für plötzlichen Schauer in Lübeck ist extrem hoch. "
+                "**Nimm auf jeden Fall einen Regenschirm oder eine wetterfeste Jacke mit!**"
+            )
+        else:
+            st.warning("⚠️ **Späterer Regen möglich! (Bewölkter Himmel)**")
+            st.write(
+                "Die KI hat Wolken oder Dunst am Himmel registriert. Aktuell ist es zwar vielleicht "
+                "noch trocken, aber das Wetter kann schnell umschlagen. "
+                "Sicher ist sicher: Pack lieber einen kleinen Schirm ein!"
+            )
     else:
+        # Wenn der Himmel hell, klar oder sonnig glänzt
         st.success("😎 **Kein Regenschirm nötig! (Schöner Himmel)**")
         st.write(
-            "Die KI erkennt einen hellen oder stark blau-dominanten Himmel. "
-            "Es gibt aktuell absolut keine Anzeichen für dichte Regenwolken. "
-            "Du kannst deinen Regenschirm heute getrost zu Hause lassen!"
+            "Das neuronale Netzwerk erkennt keine Anzeichen von dichten Schauerwolken. "
+            "Der Himmel sieht freundlich aus. Du kannst deinen Regenschirm heute zu Hause lassen!"
         )
