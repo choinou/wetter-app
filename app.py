@@ -3,22 +3,21 @@ from transformers import pipeline
 from PIL import Image
 
 # 1. App-Konfiguration & Styling
-st.set_page_config(page_title="Himmel-Scanner Lübeck", page_icon="🌦️", layout="centered")
+st.set_page_config(page_title="KI Wetter-Scanner", page_icon="🌦️", layout="centered")
 
 st.title("🌦️ KI Himmels-Scanner")
-st.write("Diese App nutzt ein neuronales Netzwerk von Hugging Face, um deine Himmelsfotos auf Schauerwolken zu analysieren.")
+st.write("Diese App nutzt ein spezialisiertes, neuronales Netzwerk, das exklusiv mit Wetter- und Wolkenbildern trainiert wurde.")
 
-# 2. Echtes Hugging-Face-Modell laden (Gecached für maximale Geschwindigkeit)
+# 2. Reines Wetter-Modell von Hugging Face laden
 @st.cache_resource
-def load_hf_model():
-    # Wir nutzen ein leichtgewichtiges, stabiles Bilderkennungsmodell von Microsoft via Hugging Face
-    # Es ist perfekt für Cloud-Server, da es extrem schnell und klein ist.
-    return pipeline("image-classification", model="microsoft/resnet-18")
+def load_weather_model():
+    # Dieses Modell wurde ausschließlich auf die Erkennung von Wetterlagen trainiert
+    return pipeline("image-classification", model="alibidaran/vit-base-weather-classification")
 
-with st.spinner("🤖 Hugging Face KI-Modell wird gestartet... Bitte kurz warten."):
+with st.spinner("🤖 Spezialisiertes Wetter-Modell wird geladen... Bitte kurz warten."):
     try:
-        classifier = load_hf_model()
-        st.success("🤖 KI-Modell erfolgreich geladen!")
+        classifier = load_weather_model()
+        st.success("✅ Wetter-KI erfolgreich gestartet!")
     except Exception as e:
         st.error(f"Fehler beim Laden des Modells: {e}")
 
@@ -34,7 +33,7 @@ with tab1:
     if camera_file:
         img_file = camera_file
 with tab2:
-    uploaded_file = st.file_uploader("Oder wähle ein Bild aus:", type=["jpg", "jpeg", "png"], key="uploader")
+    uploaded_file = st.file_uploader("Oder wähle ein Wetterbild aus:", type=["jpg", "jpeg", "png"], key="uploader")
     if uploaded_file:
         img_file = uploaded_file
 
@@ -45,43 +44,45 @@ if img_file is not None:
     st.markdown("---")
     st.subheader("🧠 KI-Analyse läuft...")
     
-    with st.spinner("Das neuronale Netzwerk analysiert das Bild..."):
-        # Das Hugging-Face-Modell analysiert das Foto und gibt die Top 5 Objekte zurück
+    with st.spinner("Das Wetter-Netzwerk analysiert die Wolkendichte..."):
+        # Die KI gibt uns direkt Wetter-Labels wie 'rainy' oder 'cloudy' zurück
         predictions = classifier(image)
         
-        # Wir holen uns alle erkannten Begriffe in eine Liste
-        detected_objects = [pred['label'].lower() for pred in predictions]
-        detected_string = ", ".join(detected_objects)
+        # Das Top-Ergebnis herausfiltern
+        top_result = predictions[0]
+        weather_label = top_result['label'].lower()
+        confidence = top_result['score'] * 100
 
-    # Unsichtbarer Entwickler-Hinweis auf dem Bildschirm (gut zum Testen)
-    st.write(f"*(Erkannte Muster der KI: {detected_string})*")
+    # Anzeige des echten Wetter-Labels
+    st.info(f"**Erkannte Wetterlage:** `{weather_label.capitalize()}` (Sicherheit: {confidence:.1f}%)")
     
     st.markdown("---")
-    st.subheader("☂️ Deine Empfehlung für den Alltag:")
+    st.subheader("☂️ Deine Empfehlung für Lübeck:")
 
-    # 5. Schlaue Alltags-Logik basierend auf den KI-Ergebnissen
-    # Wenn das Modell Wolkenstrukturen, Dunst oder graue Muster erkennt:
-    if any(word in detected_string for word in ["cloud", "sky", "mist", "fog", "rain", "umbrella"]):
-        
-        # Eine kleine Zusatz-Unterscheidung: Sieht es nach richtig schweren Wolken aus?
-        if any(heavy in detected_string for word in detected_objects for heavy in ["thunder", "dark", "grey", "cumulus"]):
-            st.error("🌧️ **Regenschirm-Alarm! (Schauer sehr wahrscheinlich)**")
-            st.write(
-                "Das Hugging-Face-Modell erkennt sehr dichte, schwere Wolkenstrukturen. "
-                "Die Wahrscheinlichkeit für plötzlichen Schauer in Lübeck ist extrem hoch. "
-                "**Nimm auf jeden Fall einen Regenschirm oder eine wetterfeste Jacke mit!**"
-            )
-        else:
-            st.warning("⚠️ **Späterer Regen möglich! (Bewölkter Himmel)**")
-            st.write(
-                "Die KI hat Wolken oder Dunst am Himmel registriert. Aktuell ist es zwar vielleicht "
-                "noch trocken, aber das Wetter kann schnell umschlagen. "
-                "Sicher ist sicher: Pack lieber einen kleinen Schirm ein!"
-            )
-    else:
-        # Wenn der Himmel hell, klar oder sonnig glänzt
-        st.success("😎 **Kein Regenschirm nötig! (Schöner Himmel)**")
+    # 5. Alltagsbezug: Regenschirm-Logik basierend auf reinen Wetter-Klassen
+    if "rain" in weather_label:
+        st.error("🌧️ **Regenschirm-Alarm! (Schauer erkannt)**")
         st.write(
-            "Das neuronale Netzwerk erkennt keine Anzeichen von dichten Schauerwolken. "
-            "Der Himmel sieht freundlich aus. Du kannst deinen Regenschirm heute zu Hause lassen!"
+            "Die KI hat das Bild eindeutig als 'Rainy' eingestuft. Es hängen schwere, "
+            "wassergeladene Wolken über dir. **Nimm auf jeden Fall einen Regenschirm mit!**"
+        )
+    elif "cloud" in weather_label:
+        st.warning("⚠️ **Späterer Regen möglich (Bewölkt).**")
+        st.write(
+            "Das Modell erkennt dichten, bewölkten Himmel ('Cloudy'). Auch wenn es im Moment "
+            "noch trocken sein sollte: Schauer können sich schnell bilden. "
+            "Pack zur Sicherheit lieber eine Regenjacke oder einen kleinen Schirm ein!"
+        )
+    elif "sun" in weather_label or "clear" in weather_label:
+        st.success("😎 **Kein Regenschirm nötig! (Sonnig)**")
+        st.write(
+            "Das Modell klassifiziert den Himmel als 'Sunny' oder 'Clear'. "
+            "Keine Schauerwolken in Sicht. Du kannst den Regenschirm heute zu Hause lassen!"
+        )
+    else:
+        # Für Klassen wie 'foggy' (nebelig)
+        st.warning("🌫️ **Dunstig / Nebelige Wetterlage**")
+        st.write(
+            "Die KI erkennt Nebel. Die Luft ist feucht, aber es droht kein akuter Wolkenbruch. "
+            "Ein dicker Schirm ist vermutlich nicht nötig, aber zieh dich warm an!"
         )
