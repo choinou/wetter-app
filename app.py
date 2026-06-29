@@ -1,6 +1,5 @@
 import streamlit as st
 import streamlit.components.v1 as components
-import json
 from PIL import Image
 import io
 import base64
@@ -40,7 +39,7 @@ if img_file is not None:
     st.markdown("---")
     st.subheader("🧠 KI-Analyse & Empfehlung:")
 
-    # Hier ist das unsichtbare JavaScript, das die echte Hugging-Face-KI im Browser startet!
+    # HIER SIND DIE KLAMMERN JETZT DOPPELT, DAMIT PYTHON SICH NICHT MEHR BESCHWERT!
     html_code = f"""
     <div id="status" style="padding: 10px; background-color: #f0f2f6; border-radius: 5px; font-family: sans-serif; margin-bottom: 10px;">
         ⏳ Lade reines Wetter-Modell (Transformers.js) in deinem Browser...
@@ -55,7 +54,6 @@ if img_file is not None:
 
         async function runKI() {{
             try {{
-                // Lädt das dedizierte Wetter-Modell direkt im Browser des Nutzers
                 statusDiv.innerText = "🧠 KI analysiert das Foto auf Schauer-Muster...";
                 const classifier = await pipeline('image-classification', 'Xenova/vit-base-weather-classification');
                 
@@ -94,7 +92,7 @@ if img_file is not None:
                             <p>Die KI erkennt Nebel oder Dunst. Ein dicker Schirm ist vermutlich nicht nötig.</p>
                         </div>`;
                 }}
-            } catch (error) {{
+            }} catch (error) {{
                 statusDiv.style.backgroundColor = "#f8d7da";
                 statusDiv.style.color = "#721c24";
                 statusDiv.innerText = "Fehler bei der KI-Berechnung: " + error.message;
