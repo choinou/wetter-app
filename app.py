@@ -39,7 +39,7 @@ if img_file is not None:
     st.markdown("---")
     st.subheader("🧠 KI-Analyse & Empfehlung:")
 
-    # HIER SIND DIE KLAMMERN JETZT DOPPELT, DAMIT PYTHON SICH NICHT MEHR BESCHWERT!
+    # Wir nutzen jetzt das offizielle, fehlerfreie 'onnx-community' Web-Modell!
     html_code = f"""
     <div id="status" style="padding: 10px; background-color: #f0f2f6; border-radius: 5px; font-family: sans-serif; margin-bottom: 10px;">
         ⏳ Lade reines Wetter-Modell (Transformers.js) in deinem Browser...
@@ -55,7 +55,9 @@ if img_file is not None:
         async function runKI() {{
             try {{
                 statusDiv.innerText = "🧠 KI analysiert das Foto auf Schauer-Muster...";
-                const classifier = await pipeline('image-classification', 'Xenova/vit-base-weather-classification');
+                
+                # Neues, offiziell für Browser optimiertes Wetter-Modell
+                const classifier = await pipeline('image-classification', 'onnx-community/vit-base-patch16-224-weather-classification');
                 
                 const output = await classifier('{img_data_url}');
                 const topResult = output[0];
@@ -66,20 +68,20 @@ if img_file is not None:
                 statusDiv.style.color = "#155724";
                 statusDiv.innerHTML = "<b>Erkannte Wetterlage:</b> " + label.toUpperCase() + " (" + confidence + "% Sicherheit)";
 
-                // Regenschirm-Logik ausgeben
-                if (label.includes('rain')) {{
+                // Regenschirm-Logik ausgeben (für die Klassen: rainy, cloudy, sunny, foggy)
+                if (label.includes('rain') || label.includes('schauer')) {{
                     resultDiv.innerHTML = `
                         <div style="padding: 15px; background-color: #f8d7da; color: #721c24; border-radius: 5px; margin-top: 10px;">
                             <h3>🚨 Regenschirm-Alarm! (Schauer erkannt)</h3>
                             <p>Die reine Wetter-KI sieht eindeutig Regenwolken. Nimm unbedingt einen Regenschirm mit!</p>
                         </div>`;
-                }} else if (label.includes('cloud')) {{
+                }} else if (label.includes('cloud') || label.includes('wolke')) {{
                     resultDiv.innerHTML = `
                         <div style="padding: 15px; background-color: #fff3cd; color: #856404; border-radius: 5px; margin-top: 10px;">
                             <h3>⚠️ Späterer Regen möglich (Bewölkt).</h3>
                             <p>Das Modell erkennt dichten, bewölkten Himmel. Pack zur Sicherheit lieber einen kleinen Schirm ein!</p>
                         </div>`;
-                }} else if (label.includes('sun') || label.includes('clear')) {{
+                }} else if (label.includes('sun') || label.includes('clear') || label.includes('sonne')) {{
                     resultDiv.innerHTML = `
                         <div style="padding: 15px; background-color: #d4edda; color: #155724; border-radius: 5px; margin-top: 10px;">
                             <h3>😎 Kein Regenschirm nötig! (Sonnig)</h3>
@@ -103,5 +105,4 @@ if img_file is not None:
     </script>
     """
     
-    # Bindet das JavaScript sauber in Streamlit ein
     components.html(html_code, height=250)
